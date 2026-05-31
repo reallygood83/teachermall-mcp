@@ -54,7 +54,7 @@ server.tool(
             ? ` (구매 ${item.purchase_count.toLocaleString()}회)`
             : '';
 
-          return `${idx + 1}. **[${item.goods_name}](${item.shop_url})**\n   ${priceText}${purchaseText}\n   판매자: ${item.provider_name || '티처몰'}\n   이미지: ${item.image_url}`;
+          return `${idx + 1}. **[${item.goods_name}](${item.shop_url})**\n   ${priceText}${purchaseText}\n   판매자: ${item.provider_name || '티처몰'}\n   구매 링크: ${item.shop_url}\n   이미지: ${item.image_url}`;
         })
         .join('\n\n');
 
@@ -106,7 +106,7 @@ server.tool(
         .map((item, idx) => {
           const price = `**${item.price.toLocaleString()}원**`;
           const purchase = item.purchase_count ? ` · 구매 ${item.purchase_count}회` : '';
-          return `${idx + 1}. [${item.goods_name}](${item.shop_url}) — ${price}${purchase}`;
+          return `${idx + 1}. [${item.goods_name}](${item.shop_url}) — ${price}${purchase}\n   구매 링크: ${item.shop_url}`;
         })
         .join('\n');
 
@@ -202,7 +202,7 @@ server.tool(
     const text = items.map((item, i) => {
       const price = `${item.price.toLocaleString()}원`;
       const purchase = item.purchase_count ? ` · 인기 ${item.purchase_count}회` : '';
-      return `${i + 1}. [${item.goods_name}](${item.shop_url}) — ${price}${purchase}`;
+      return `${i + 1}. [${item.goods_name}](${item.shop_url}) — ${price}${purchase}\n   구매 링크: ${item.shop_url}`;
     }).join('\n');
 
     const budgetNote = maxPrice ? ` (예산 ${maxPrice.toLocaleString()}원 이하)` : '';
@@ -228,15 +228,24 @@ server.tool(
     itemCount: z.number().int().min(3).max(8).default(5).describe('키트 상품 수'),
     excludeKeywords: z.array(z.string()).optional().describe('제외할 키워드'),
   },
-  async ({ purpose, grade, maxBudget, itemCount }) => {
-    const needs = [purpose, grade, '보상', '스티커', '학급'].filter(Boolean) as string[];
+  async ({ purpose, grade, maxBudget, itemCount, excludeKeywords = [] }) => {
+    const isRewardKit = /보상|칭찬|상점|리워드|쿠폰|스티커/.test(purpose);
+    const needs = (isRewardKit
+      ? ['보상 스티커', '칭찬 스티커', '상장', '칭찬 도장', '쿠폰']
+      : [purpose, grade ? `${grade} ${purpose}` : '', '학급 준비물', '교구', '이름표'])
+      .filter(Boolean) as string[];
+    const defaultExcludes = isRewardKit ? ['NFC', '키링', '간식'] : [];
+    const mergedExcludes = [...new Set([...excludeKeywords, ...defaultExcludes])];
 
     if (maxBudget) {
-      const optimized = await client.findBestUnderBudget(needs, maxBudget, { itemCount });
+      const optimized = await client.findBestUnderBudget(needs, maxBudget, {
+        itemCount,
+        excludeKeywords: mergedExcludes,
+      });
 
       const text = optimized.items.map((item, i) => {
         const price = `${item.price.toLocaleString()}원`;
-        return `${i + 1}. [${item.goods_name}](${item.shop_url}) — ${price}`;
+        return `${i + 1}. [${item.goods_name}](${item.shop_url}) — ${price}\n   구매 링크: ${item.shop_url}`;
       }).join('\n');
 
       return {
@@ -249,11 +258,16 @@ server.tool(
 
     // Fallback to previous behavior when no budget
     const query = [purpose, grade, '스티커', '보상'].filter(Boolean).join(' ');
-    const result = await client.searchProducts(query, { limit: itemCount + 4, sort: 'popular' });
-    const kitItems = result.items.slice(0, itemCount);
+    const resultItems = await client.smartSearch(query, {
+      limit: itemCount + 4,
+      excludeKeywords: mergedExcludes,
+    });
+    const kitItems = resultItems.slice(0, itemCount);
     const total = kitItems.reduce((sum, i) => sum + i.price, 0);
 
-    const text = kitItems.map((item, i) => `${i + 1}. [${item.goods_name}](${item.shop_url}) — ${item.price.toLocaleString()}원`).join('\n');
+    const text = kitItems
+      .map((item, i) => `${i + 1}. [${item.goods_name}](${item.shop_url}) — ${item.price.toLocaleString()}원\n   구매 링크: ${item.shop_url}`)
+      .join('\n');
 
     return {
       content: [{
@@ -330,7 +344,7 @@ server.tool(
       list.forEach((item: any) => {
         const popular = item.purchase_count ? ` (인기 ${item.purchase_count}회)` : '';
         text += `- [ ] **${item.goods_name}** — ${item.price.toLocaleString()}원${popular}\n`;
-        text += `  - [바로가기](${item.shop_url})\n`;
+        text += `  - 구매 링크: ${item.shop_url}\n`;
       });
       text += `\n`;
     });
@@ -357,7 +371,7 @@ server.tool(
     const optimized = await client.findBestUnderBudget(needs, maxBudget, { itemCount });
 
     const text = optimized.items.map((item, i) =>
-      `${i + 1}. [${item.goods_name}](${item.shop_url}) — ${item.price.toLocaleString()}원`
+      `${i + 1}. [${item.goods_name}](${item.shop_url}) — ${item.price.toLocaleString()}원\n   구매 링크: ${item.shop_url}`
     ).join('\n');
 
     return {
@@ -397,13 +411,13 @@ server.tool(
       const optimized = await client.findBestUnderBudget(needs, maxBudget, { itemCount: 8 });
       resultText += `**예산 ${maxBudget.toLocaleString()}원 내 추천** (총 ${optimized.totalCost.toLocaleString()}원)\n\n`;
       optimized.items.forEach((item, i) => {
-        resultText += `${i + 1}. [${item.goods_name}](${item.shop_url}) — ${item.price.toLocaleString()}원\n`;
+        resultText += `${i + 1}. [${item.goods_name}](${item.shop_url}) — ${item.price.toLocaleString()}원\n   구매 링크: ${item.shop_url}\n`;
       });
     } else {
       const items = await client.smartSearch(needs.join(' '), { limit: 8 });
       resultText += `**추천 상품**\n\n`;
       items.forEach((item, i) => {
-        resultText += `${i + 1}. [${item.goods_name}](${item.shop_url}) — ${item.price.toLocaleString()}원\n`;
+        resultText += `${i + 1}. [${item.goods_name}](${item.shop_url}) — ${item.price.toLocaleString()}원\n   구매 링크: ${item.shop_url}\n`;
       });
     }
 

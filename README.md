@@ -1,6 +1,6 @@
 # Teachermall MCP (티처몰 MCP)
 
-Claude Code에서 **자연어로** 티처몰(shop.teacherville.co.kr)의 상품을 검색하고, 학급운영·수업 준비물을 똑똑하게 추천받을 수 있는 고품질 MCP 서버 + 슬래시 명령어입니다.
+Claude Code와 Codex에서 **자연어로** 티처몰(shop.teacherville.co.kr)의 상품을 검색하고, 학급운영·수업 준비물을 추천받을 수 있는 MCP 서버 + Claude Code 슬래시 명령어입니다.
 
 **GitHub**: https://github.com/reallygood83/teachermall-mcp
 
@@ -35,34 +35,62 @@ npm install
 npm run build
 ```
 
-### 3. MCP 등록 (가장 중요)
+### 3. Claude Code + Codex MCP 등록
 
-`~/.claude/settings.local.json` (또는 `settings.json`) 파일에 아래 내용을 추가하세요:
+가장 쉬운 방법은 제공 스크립트를 실행하는 것입니다. 현재 레포 경로를 자동으로 감지해 `dist/index.js`를 Claude Code와 Codex 양쪽에 등록합니다.
+
+```bash
+./scripts/setup-claude.sh
+```
+
+스크립트가 하는 일:
+- `~/.claude/mcp.json`에 `teachermall` MCP 서버 등록
+- `~/.codex/config.toml`에 `[mcp_servers.teachermall]` 등록
+- `commands/tcv.md`를 `~/.claude/commands/tcv.md`로 설치
+- 기존 설정 파일은 타임스탬프 백업 생성
+
+수동 등록이 필요하면 아래 예시를 사용하세요.
+
+Claude Code:
 
 ```json
 {
   "mcpServers": {
-    "teacherville": {
+    "teachermall": {
       "command": "node",
-      "args": ["/Users/당신의유저명/teachermall-mcp/dist/index.js"],
+      "args": ["/ABSOLUTE/PATH/teachermall-mcp/dist/index.js"],
       "description": "티처몰(Teacherville) 학급운영·수업 준비물 추천 MCP"
     }
   }
 }
 ```
 
-> `args`의 경로는 본인 환경에 맞게 수정해주세요.
+Codex:
 
-### 4. /tcv 슬래시 명령어 설치 (강력 추천)
-
-```bash
-mkdir -p ~/.claude/commands
-cp commands/tcv.md ~/.claude/commands/tcv.md
+```toml
+[mcp_servers.teachermall]
+command = "node"
+args = ["/ABSOLUTE/PATH/teachermall-mcp/dist/index.js"]
+startup_timeout_sec = 30.0
+tool_timeout_sec = 120.0
 ```
 
-### 5. Claude Code 완전 재시작
+> `args`의 경로는 본인 환경에 맞게 수정해주세요.
 
-설치 후 Claude Code를 완전히 종료하고 다시 실행하세요.
+### 4. Claude Code와 Codex 완전 재시작
+
+설치 후 Claude Code와 Codex를 완전히 종료하고 다시 실행하세요.
+
+### 5. 검증
+
+```bash
+npm run typecheck
+npm test
+npm run build
+npm run smoke:mcp
+```
+
+`smoke:mcp`는 빌드된 MCP 서버가 9개 도구를 정상 노출하는지 확인합니다.
 
 ## 사용 방법
 
@@ -88,6 +116,7 @@ Claude Code에서 그냥 이렇게 말해도 됩니다:
 - 이 MCP는 티처몰 공식 API가 아닌 내부 엔드포인트를 사용합니다.
 - 사이트 구조 변경 시 일부 기능이 동작하지 않을 수 있습니다.
 - 과도한 요청은 자제해주세요 (기본 캐싱 적용됨).
+- 추천 로직은 관련도 하한을 적용하지만, 구매 전에는 실제 상세 페이지의 옵션과 배송 조건을 확인하세요.
 
 ## 로드맵
 

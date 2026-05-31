@@ -2,6 +2,7 @@ import { Product, SearchResult, SearchOptions } from '../types/product.js';
 import * as cheerio from 'cheerio';
 
 const BASE_URL = 'https://shop.teacherville.co.kr';
+const GRADE_PATTERN = /^(유치원|초등)?\s*\d+\s*학년$/;
 const DEFAULT_HEADERS = {
   'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
   'Accept': 'application/json, text/plain, */*',
@@ -24,6 +25,53 @@ function parsePrice(priceStr: string | number | undefined): number {
   if (!priceStr) return 0;
   const cleaned = String(priceStr).replace(/[^0-9]/g, '');
   return parseInt(cleaned, 10) || 0;
+}
+
+export function normalizeSearchToken(token: string): string {
+  return token
+    .toLowerCase()
+    .replace(/[()[\]{}'"“”‘’]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function getMeaningfulQueryTokens(query: string): string[] {
+  return normalizeSearchToken(query)
+    .split(/\s+/)
+    .filter(token => token.length > 1 && !GRADE_PATTERN.test(token));
+}
+
+function getPrimaryQueryTokens(query: string): string[] {
+  const tokens = getMeaningfulQueryTokens(query);
+  return tokens.length > 0 ? [tokens[0]] : [];
+}
+
+export function extractPriceCandidates(text: string): number[] {
+  const candidates: number[] = [];
+  const wonPattern = /(?:^|[^\d])(\d{1,3}(?:,\d{3})+|\d{3,7})\s*원/g;
+  let match: RegExpExecArray | null;
+
+  while ((match = wonPattern.exec(text)) !== null) {
+    const price = parsePrice(match[1]);
+    if (price > 0 && price < 10_000_000) {
+      candidates.push(price);
+    }
+  }
+
+  return candidates;
+}
+
+function chooseRepresentativePrice(candidates: number[]): number {
+  const unique = [...new Set(candidates)].filter(price => price > 0).sort((a, b) => a - b);
+  if (unique.length === 0) return 0;
+
+  const commonRetailPrices = unique.filter(price => price >= 100 && price <= 500_000);
+  return commonRetailPrices[0] ?? unique[0];
+}
+
+function parseStandalonePriceCandidate(text: string): number {
+  const price = parsePrice(text);
+  return price > 0 && price < 10_000_000 ? price : 0;
 }
 
 function mapApiItemToProduct(item: any): Product {
@@ -54,7 +102,10 @@ export class TeachervilleClient {
   }
 
   private getCacheKey(endpoint: string, params: Record<string, any>): string {
-    const sorted = Object.keys(params).sort().map(k => `${k}=${params[k]}`).join('&');
+    const sorted = Object.keys(params)
+      .sort()
+      .map(k => `${k}=${Array.isArray(params[k]) ? params[k].join(',') : params[k] ?? ''}`)
+      .join('&');
     return `${endpoint}?${sorted}`;
   }
 
@@ -100,7 +151,7 @@ export class TeachervilleClient {
   ): Promise<SearchResult> {
     const { page = 1, limit = 12, sort = 'relevance', minPrice, maxPrice } = options;
 
-    const cacheKey = this.getCacheKey('search', { query, page, limit, sort });
+    const cacheKey = this.getCacheKey('search', { query, page, limit, sort, minPrice, maxPrice });
     const cached = this.getFromCache<SearchResult>(cacheKey);
     if (cached) return cached;
 
@@ -240,11 +291,19 @@ export class TeachervilleClient {
         .replace(/[\n\t\r,원]/g, ' ')
         .trim();
 
-      const prices = Array.from($('.price, .sell, .consumer, [class*="price"]'))
+      const priceTexts = Array.from($('.price, .sell, .consumer, [class*="price"], meta[property="product:price:amount"], meta[itemprop="price"]'))
         .map(el => $(el).text())
-        .join(' ');
+        .concat(
+          $('meta[property="product:price:amount"]').attr('content') || '',
+          $('meta[itemprop="price"]').attr('content') || ''
+        )
+        .filter(Boolean);
 
-      const currentPrice = parsePrice(prices) || parsePrice(priceText);
+      const currentPrice = chooseRepresentativePrice([
+        ...priceTexts.flatMap(text => extractPriceCandidates(text)),
+        ...priceTexts.map(parseStandalonePriceCandidate).filter(Boolean),
+        ...extractPriceCandidates(priceText),
+      ]);
 
       // Multiple images
       const images: string[] = [];
@@ -333,6 +392,7 @@ export class TeachervilleClient {
     const name = item.goods_name || '';
     const nameLower = name.toLowerCase();
     const queryLower = query.toLowerCase();
+    const queryWords = getMeaningfulQueryTokens(queryLower);
 
     let score = 0;
 
@@ -345,11 +405,14 @@ export class TeachervilleClient {
     if (nameLower.includes(queryLower)) {
       matchBonus += 280; // strong exact phrase match
     } else {
-      const queryWords = queryLower.split(/\s+/).filter(w => w.length > 1);
       const matchedWords = queryWords.filter(w => nameLower.includes(w)).length;
       matchBonus += matchedWords * 85;
     }
     score += matchBonus;
+
+    if (queryWords.length > 0 && queryWords.every(w => nameLower.includes(w))) {
+      score += 220;
+    }
 
     // 3. Boost keywords (학년, 보상, 스티커 등)
     boostKeywords.forEach(kw => {
@@ -399,19 +462,41 @@ export class TeachervilleClient {
     maxPrice?: number;
     boostKeywords?: string[];
     excludeKeywords?: string[];   // NEW: force exclude
+    requiredKeywords?: string[];
   } = {}): Promise<Product[]> {
-    const { limit = 10, minPrice, maxPrice, boostKeywords = [], excludeKeywords = [] } = options;
+    const { limit = 10, minPrice, maxPrice, boostKeywords = [], excludeKeywords = [], requiredKeywords } = options;
+    const required = (requiredKeywords ?? getPrimaryQueryTokens(query)).map(normalizeSearchToken).filter(Boolean);
+    const fetchLimit = Math.min(35, limit * 3 + 8);
 
-    const raw = await this.searchProducts(query, {
-      limit: Math.min(35, limit * 3 + 8),
-      minPrice,
-      maxPrice,
-      sort: 'popular',
+    const searchVariants = [
+      { query, sort: 'relevance' as const },
+      { query, sort: 'popular' as const },
+    ];
+
+    const shortQuery = getMeaningfulQueryTokens(query).join(' ');
+    if (shortQuery && shortQuery !== normalizeSearchToken(query)) {
+      searchVariants.push({ query: shortQuery, sort: 'relevance' as const });
+    }
+
+    const responses = await Promise.all(searchVariants.map(variant =>
+      this.searchProducts(variant.query, {
+        limit: fetchLimit,
+        minPrice,
+        maxPrice,
+        sort: variant.sort,
+      })
+    ));
+
+    const merged = new Map<string, Product>();
+    responses.flatMap(response => response.items).forEach(item => {
+      if (item.goods_seq) merged.set(item.goods_seq, item);
     });
 
-    let items = raw.items.filter(item => {
+    let items = [...merged.values()].filter(item => {
       const nameLower = item.goods_name.toLowerCase();
-      return !excludeKeywords.some(kw => nameLower.includes(kw.toLowerCase()));
+      const excluded = excludeKeywords.some(kw => nameLower.includes(kw.toLowerCase()));
+      const missingRequired = required.length > 0 && !required.some(kw => nameLower.includes(kw));
+      return !excluded && !missingRequired;
     });
 
     // Calculate advanced scores
@@ -449,12 +534,16 @@ export class TeachervilleClient {
    * Very simple budget optimizer: greedy selection under budget.
    * Good enough for small kits (5-8 items).
    */
-  async findBestUnderBudget(needs: string[], maxBudget: number, options: { itemCount?: number } = {}) {
+  async findBestUnderBudget(needs: string[], maxBudget: number, options: { itemCount?: number; excludeKeywords?: string[] } = {}) {
     const targetCount = options.itemCount || 5;
     const candidates: Product[] = [];
 
     for (const need of needs) {
-      const results = await this.smartSearch(need, { limit: 6 });
+      const results = await this.smartSearch(need, {
+        limit: 6,
+        excludeKeywords: options.excludeKeywords,
+        requiredKeywords: getPrimaryQueryTokens(need),
+      });
       candidates.push(...results);
     }
 

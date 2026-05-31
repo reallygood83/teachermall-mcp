@@ -1,56 +1,72 @@
-#!/bin/bash
-# One-command setup helper for Claude Code
+#!/usr/bin/env bash
+# Register this MCP server with Claude Code and Codex.
 
-set -e
+set -euo pipefail
 
-MCP_DIR="$HOME/mcp-servers/teacherville-mcp"
-SETTINGS_FILE="$HOME/.claude/settings.json"
+PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+DIST_INDEX="$PROJECT_DIR/dist/index.js"
+CLAUDE_MCP_FILE="${CLAUDE_MCP_FILE:-$HOME/.claude/mcp.json}"
+CODEX_CONFIG_FILE="${CODEX_CONFIG_FILE:-$HOME/.codex/config.toml}"
+CLAUDE_COMMANDS_DIR="${CLAUDE_COMMANDS_DIR:-$HOME/.claude/commands}"
 
-echo "🚀 티처몰 MCP Claude Code 등록 도우미"
-echo ""
+echo "Teachermall MCP setup"
+echo "Project: $PROJECT_DIR"
 
-# Check if built
-if [ ! -f "$MCP_DIR/dist/index.js" ]; then
-  echo "❌ 빌드된 파일이 없습니다. 먼저 다음 명령어를 실행하세요:"
-  echo "   cd $MCP_DIR && npm install && npm run build"
-  exit 1
+if [ ! -d "$PROJECT_DIR/node_modules" ]; then
+  echo "Installing dependencies..."
+  npm --prefix "$PROJECT_DIR" install
 fi
 
-# Backup settings
-if [ -f "$SETTINGS_FILE" ]; then
-  cp "$SETTINGS_FILE" "$SETTINGS_FILE.backup.$(date +%Y%m%d-%H%M%S)"
-  echo "✅ 기존 settings.json 백업 완료"
+if [ ! -f "$DIST_INDEX" ]; then
+  echo "Building dist..."
+  npm --prefix "$PROJECT_DIR" run build
 fi
 
-# Add or update the teacherville entry
-node -e '
-const fs = require("fs");
-const path = require("path");
+mkdir -p "$(dirname "$CLAUDE_MCP_FILE")" "$(dirname "$CODEX_CONFIG_FILE")" "$CLAUDE_COMMANDS_DIR"
 
-const settingsPath = process.argv[1];
-const mcpPath = process.argv[2];
+if [ -f "$CLAUDE_MCP_FILE" ]; then
+  cp "$CLAUDE_MCP_FILE" "$CLAUDE_MCP_FILE.backup.$(date +%Y%m%d-%H%M%S)"
+fi
 
-let settings = {};
-if (fs.existsSync(settingsPath)) {
-  settings = JSON.parse(fs.readFileSync(settingsPath, "utf8"));
+if [ -f "$CODEX_CONFIG_FILE" ]; then
+  cp "$CODEX_CONFIG_FILE" "$CODEX_CONFIG_FILE.backup.$(date +%Y%m%d-%H%M%S)"
+fi
+
+node - "$CLAUDE_MCP_FILE" "$CODEX_CONFIG_FILE" "$DIST_INDEX" <<'NODE'
+const fs = require('node:fs');
+const claudePath = process.argv[2];
+const codexPath = process.argv[3];
+const serverPath = process.argv[4];
+
+let claude = {};
+if (fs.existsSync(claudePath)) {
+  claude = JSON.parse(fs.readFileSync(claudePath, 'utf8'));
 }
 
-if (!settings.mcpServers) settings.mcpServers = {};
-
-settings.mcpServers.teacherville = {
-  command: "node",
-  args: [mcpPath],
-  description: "티처몰 상품 검색 — 학급운영, 교구, 스티커, 준비물 (개인용 고품질 MCP)"
+claude.mcpServers ??= {};
+claude.mcpServers.teachermall = {
+  command: 'node',
+  args: [serverPath],
+  description: '티처몰 상품 검색 및 교사용 준비물 추천 MCP',
 };
 
-fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
-console.log("✅ ~/.claude/settings.json에 teacherville MCP가 등록되었습니다.");
-' "$SETTINGS_FILE" "$MCP_DIR/dist/index.js"
+fs.writeFileSync(claudePath, `${JSON.stringify(claude, null, 2)}\n`);
 
-echo ""
-echo "🎉 완료! 이제 Claude Code를 완전히 재시작하세요."
-echo ""
-echo "테스트 예시:"
-echo "  \"티처몰에서 스티커 검색해줘\""
-echo "  \"이번 학기 보상 스티커로 뭐가 인기 있어?\""
-echo ""
+const block = `[mcp_servers.teachermall]
+command = "node"
+args = ["${serverPath.replaceAll('\\', '\\\\').replaceAll('"', '\\"')}"]
+startup_timeout_sec = 30.0
+tool_timeout_sec = 120.0
+`;
+
+let codex = fs.existsSync(codexPath) ? fs.readFileSync(codexPath, 'utf8') : '';
+codex = codex.replace(/(?:^|\n)\[mcp_servers\.teachermall\]\n[\s\S]*?(?=\n\[|\s*$)/m, '\n').trimEnd();
+fs.writeFileSync(codexPath, `${codex}\n\n${block}`);
+NODE
+
+cp "$PROJECT_DIR/commands/tcv.md" "$CLAUDE_COMMANDS_DIR/tcv.md"
+
+echo "Registered Claude Code MCP: $CLAUDE_MCP_FILE"
+echo "Registered Codex MCP: $CODEX_CONFIG_FILE"
+echo "Installed Claude slash command: $CLAUDE_COMMANDS_DIR/tcv.md"
+echo "Restart Claude Code and Codex to load the server."
