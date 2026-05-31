@@ -1,0 +1,45 @@
+{
+  "name": "teacherville-mcp",
+  "version": "0.1.0",
+  "description": "고품질 개인용 티처몰(shop.teacherville.co.kr) MCP 서버 - Claude Code에서 자연어로 학급운영/교구 상품 검색",
+  "type": "module",
+  "main": "dist/index.js",
+  "bin": {
+    "teacherville-mcp": "dist/index.js",
+    "teacherville": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx src/index.ts",
+    "start": "node dist/index.js",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit",
+    "lint": "echo 'Add eslint later if needed'"
+  },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "teacherville",
+    "티처몰",
+    "학급운영",
+    "교구",
+    "claude",
+    "shopping"
+  ],
+  "author": "Personal Use",
+  "license": "MIT",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.9.0",
+    "cheerio": "^1.0.0",
+    "lru-cache": "^10.2.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}
