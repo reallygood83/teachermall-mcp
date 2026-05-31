@@ -8,6 +8,7 @@ DIST_INDEX="$PROJECT_DIR/dist/index.js"
 CLAUDE_MCP_FILE="${CLAUDE_MCP_FILE:-$HOME/.claude/mcp.json}"
 CODEX_CONFIG_FILE="${CODEX_CONFIG_FILE:-$HOME/.codex/config.toml}"
 CLAUDE_COMMANDS_DIR="${CLAUDE_COMMANDS_DIR:-$HOME/.claude/commands}"
+CODEX_SKILLS_DIR="${CODEX_SKILLS_DIR:-$HOME/.codex/skills}"
 
 echo "Teachermall MCP setup"
 echo "Project: $PROJECT_DIR"
@@ -22,7 +23,7 @@ if [ ! -f "$DIST_INDEX" ]; then
   npm --prefix "$PROJECT_DIR" run build
 fi
 
-mkdir -p "$(dirname "$CLAUDE_MCP_FILE")" "$(dirname "$CODEX_CONFIG_FILE")" "$CLAUDE_COMMANDS_DIR"
+mkdir -p "$(dirname "$CLAUDE_MCP_FILE")" "$(dirname "$CODEX_CONFIG_FILE")" "$CLAUDE_COMMANDS_DIR" "$CODEX_SKILLS_DIR/tcv"
 
 if [ -f "$CLAUDE_MCP_FILE" ]; then
   cp "$CLAUDE_MCP_FILE" "$CLAUDE_MCP_FILE.backup.$(date +%Y%m%d-%H%M%S)"
@@ -65,8 +66,10 @@ fs.writeFileSync(codexPath, `${codex}\n\n${block}`);
 NODE
 
 cp "$PROJECT_DIR/commands/tcv.md" "$CLAUDE_COMMANDS_DIR/tcv.md"
+cp "$PROJECT_DIR/skills/tcv/SKILL.md" "$CODEX_SKILLS_DIR/tcv/SKILL.md"
 
 echo "Registered Claude Code MCP: $CLAUDE_MCP_FILE"
 echo "Registered Codex MCP: $CODEX_CONFIG_FILE"
 echo "Installed Claude slash command: $CLAUDE_COMMANDS_DIR/tcv.md"
+echo "Installed Codex skill: $CODEX_SKILLS_DIR/tcv/SKILL.md"
 echo "Restart Claude Code and Codex to load the server."

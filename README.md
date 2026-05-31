@@ -47,6 +47,7 @@ npm run build
 - `~/.claude/mcp.json`에 `teachermall` MCP 서버 등록
 - `~/.codex/config.toml`에 `[mcp_servers.teachermall]` 등록
 - `commands/tcv.md`를 `~/.claude/commands/tcv.md`로 설치
+- `skills/tcv/SKILL.md`를 `~/.codex/skills/tcv/SKILL.md`로 설치
 - 기존 설정 파일은 타임스탬프 백업 생성
 
 수동 등록이 필요하면 아래 예시를 사용하세요.
@@ -104,6 +105,18 @@ npm run smoke:mcp
 /tcv [수업 계획이나 단원 설명 텍스트를 길게 붙여넣기]
 이 수업에 필요한 물품 리스트 만들어줘
 ```
+
+### Codex에서 사용
+
+Codex에서는 설치 후 다음처럼 호출하세요:
+
+```bash
+$tcv 3학년 화산 실험 준비물 2만원 이하로 추천해줘
+
+tcv 2학년 보상체계 키트 3만원, 간식 제외
+```
+
+Codex skill은 Claude Code와 달리 `$tcv`/`tcv` 형태로 트리거됩니다.
 
 ### 자연어로 직접 사용
 
